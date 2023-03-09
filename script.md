@@ -397,10 +397,14 @@ boundary targets create ssh \
 
 Connect to the server
 
+**Target Connect SSH**
+
 ```shell
 boundary connect ssh \
   -token="file://.boundary_token" \
-  -target-id=<my target> -- -l root -i ./shipyard/frontend/files/ssh_keys/id_rsa
+  -target-id=<my target> -- \
+    -l root \
+    -i ./shipyard/frontend/files/ssh_keys/id_rsa
 ```
 
 ### Automatically injecting credentials from Vault
@@ -411,6 +415,8 @@ credentials for the server. Let's now see how we can inject the credentials
 automatically from Vault.
 
 First we need to add the private key as a secret to Vault
+
+**Vault SSH Secret**
 
 ```shell
 vault kv put secret/vm \
@@ -423,7 +429,7 @@ the boundary controller.
 
 *create file secrets_policy.hcl*
 
-**Vault Secrets Policy**
+**Vault SSH Policy**
 
 ```hcl
 path = "secret/data/vm" {
@@ -431,34 +437,15 @@ path = "secret/data/vm" {
 }
 ```
 
-
-For Boundary to use Vault secrets it needs to be able to authenticate
-to do this we are going to configure Boundary with an orphaned Vault token.
-
-We can do that with the following command:
-
-**Vault Token Create**
-
-```shell
-vault token create \
-  -period=30m \
-  -format=json \
-  -orphan=true \
-  -policy=boundary-controller-token \
-  -policy=boundary-controller-secrets \
-  -no-default-policy=true \
-  -renewable=true
-```
-
-This creates an orphaned token for Boundary, Boundary will need to manage
-the lifecycle of this token so in order for it to do that you need the
+Boundary will need to manage the lifecycle of this
+token so in order for it to do that you need the
 following policy in addition to the secrets.
 
 *Create file controller_policy* 
 
 **Vault Controller Policy**
 
-```hcl
+```javascript
 path "auth/token/lookup-self" {
   capabilities = ["read"]
 }
@@ -493,10 +480,30 @@ vault policy write boundary-controller-secrets secrets_policy.hcl
 vault policy write boundary-controller-token controller_policy.hcl
 ```
 
-Now that the policy has been created you need to create a credentials store,
+For Boundary to use Vault secrets it needs to be able to authenticate
+to do this we are going to configure Boundary with an orphaned Vault token.
+
+We can do that with the following command:
+
+**Vault Token Create**
+
+```shell
+vault token create \
+  -period=30m \
+  -format=json \
+  -orphan=true \
+  -policy=boundary-controller-token \
+  -policy=boundary-controller-secrets \
+  -no-default-policy=true \
+  -renewable=true
+```
+
+Now that the policy and token has been created you need to create a credentials store,
 a credentials store enables the Boundary controller to retrieve secrets from Vault.
 It is possible to have multiple credential stores with differing secrets access
 or even different Vault clusters.
+
+**Credential Store Create**
 
 ```shell
 boundary credential-stores create vault \
@@ -533,6 +540,8 @@ the reason for this is that Vault is not public. It is actually inside our Vault
 No problem here, we can actually use Boundary to solve this issue, by having a 
 boundary worker proxy connections to Vault.
 
+**Credential Store Create Filter**
+
 ```shell
 boundary credential-stores create vault \
   -token="file://.boundary_token" \
@@ -554,6 +563,8 @@ into a target you need to define a credential library that shows exactly which
 secrets to inject. For our SSH secret we can use the following command.
 We are setting a `credential-type` of `ssh_private_key`.
 
+**Credential Library Create**
+
 ```shell
 boundary credential-libraries create vault \
   -token="file://.boundary_token" \
@@ -566,12 +577,16 @@ boundary credential-libraries create vault \
 Then finally you associate that credential library with the target that 
 you created earlier.
 
+**Credential Targets Add**
+
 ```shell
 boundary targets add-credential-sources \
   -token="file://.boundary_token" \
   -id <target id> \
   -injected-application-credential-source <cred source>
 ```
+
+**Boundary Connect SSH**
 
 ```shell
 boundary connect ssh \
@@ -602,12 +617,16 @@ This plugin can be downloaded from the following location.
 
 The first step is to enable the plugin in Vault
 
+**Vault Enable Boundary**
+
 ```shell
 vault secrets enable boundary
 ```
 
 Then we need to configure the Boundary plugin, passing it the location of the 
 Boundary server and the user details. 
+
+**Vault Configure Boundary**
 
 ```shell
 vault write boundary/config \
@@ -619,15 +638,19 @@ vault write boundary/config \
 
 Then we create a role that allows the generation of worker tokens
 
+**Vault Worker Role**
+
 ```shell
 vault write boundary/role/worker \
   ttl=180 \
-  max_ttl=360 \
+  max_ttl=3600 \
   role_type=worker \
   scope_id=global
 ```
 
 We can test this by running the following command:
+
+**Vault Generate Worker Creds**
 
 ```shell
 vault read boundary/creds/worker worker_name="local worker"
@@ -649,7 +672,7 @@ the boundary worker job
 
 *create file worker_policy.hcl*
 
-**Vault Secrets Policy**
+**Vault Worker Policy**
 
 ```hcl
 path = "boundary/creds/worker" {
@@ -659,13 +682,120 @@ path = "boundary/creds/worker" {
 
 And then write this to Vault 
 
+**Vault Write Worker Policy**
+
 ```shell
 vault policy write boundary-worker worker_policy.hcl
 ```
 
-Let's now create a Nomad job for running a worker
+Let's now create a Nomad job for running a worker, first create a base job
+for Nomad.
+
+*create file nomad_worker.hcl*
+
+**Nomad Worker Base**
 
 ```hcl
+job "boundary_worker" {
+  datacenters = ["dc1"]
+
+  type = "service"
+
+  group "worker" {
+    count = 1
+
+    restart {
+      # The number of attempts to run the job within the specified interval.
+      attempts = 2
+      interval = "30m"
+      delay    = "15s"
+      mode     = "fail"
+    }
+
+    ephemeral_disk {
+      size = 30
+    }
+
+    task "worker" {
+      driver = "docker"
+
+      logs {
+        max_files     = 2
+        max_file_size = 10
+      }
+
+      resources {
+        cpu    = 500 # 500 MHz
+        memory = 512 # 512MB
+      }
+    }
+  }
+}
+```
+
+Next you need to add the Vault stanza to the task stanza, so that Nomad can 
+access the secrets.
+
+*add to task stanza*
+
+**Nomad Worker Vault Stanza**
+
+```hcl
+      vault {
+        policies = ["boundary-worker"]
+      }
+```
+
+Now you can add a template that generate the worker configuration
+
+*add to task stanza*
+
+**Nomad Worker Template**
+
+```hcl
+      template {
+        data = <<-EOF
+          disable_mlock = true
+
+          hcp_boundary_cluster_id = "739d93f9-7f1c-474d-8524-931ab199eaf8"
+
+          listener "tcp" {
+            address = "0.0.0.0:9202"
+            purpose = "proxy"
+          }
+
+          worker {
+            auth_storage_path="/boundary/auth_data"
+            {{with secret "boundary/creds/worker" (env "NOMAD_ALLOC_ID" | printf "worker_name=%s") -}}
+              controller_generated_activation_token = "{{.Data.activation_token}}"
+            {{- end}}
+  
+            tags {
+              environment   = ["nomad"]
+            }
+          }
+        EOF
+
+        destination = "local/config.hcl"
+      }
+```
+
+Finally you can add the config block to run the worker
+
+*add to task stanza*
+
+**Nomad Worker Config**
+
+```hcl
+      config {
+        image   = "hashicorp/boundary-worker-hcp:0.12.0-hcp"
+        command = "boundary-worker"
+        args = [
+          "server",
+          "-config",
+          "local/config.hcl"
+        ]
+      }
 ```
 
 ### Deploying Census
@@ -673,7 +803,9 @@ Let's now create a Nomad job for running a worker
 First we need to create the secrets for the Nomad job we will use to run 
 Census.
 
-```
+**Vault Secrets Census**
+
+```shell
 vault kv put secret/census \
   boundary_username="${boundary_username}" \
   boundary_password="${boundary_password}" \
@@ -681,9 +813,12 @@ vault kv put secret/census \
   boundary_auth_method_id="${boundary_auth_method_id}"
 ```
 
+Then you need to create a policy so that Census can access these secrets 
+through Nomad. 
+
 *create file census_policy.hcl*
 
-**Vault Secrets Policy**
+**Vault Census Policy**
 
 ```hcl
 path "secret/data/census" {
@@ -693,11 +828,24 @@ path "secret/data/census" {
 
 And then write this to Vault 
 
+**Vault Census Policy Write**
+
 ```shell
 vault policy write boundary-census census_policy.hcl
 ```
 
-Deploy the API job
+Finally you can deploy the census job
+
+**Nomad Deploy Census**
+
+```shell
+nomad run ./shipyard/backend/files/jobs/census.hcl
+```
+
+Once Census is running you can deploy a Nomad job and see this automatically
+register in Boundary.
+
+**Nomad Deploy API**
 
 ```shell
 nomad run ./shipyard/backend/files/jobs/api.hcl
@@ -705,6 +853,10 @@ nomad run ./shipyard/backend/files/jobs/api.hcl
 
 Run the worker to connect to the api
 
+**Boundary Connect API**
+
 ```shell
-boundary connect -target-id ttcp_b0Y1moFWMW -token="file://.boundary_token"
+boundary connect \
+  -target-id <target id> \
+  -token="file://.boundary_token"
 ```

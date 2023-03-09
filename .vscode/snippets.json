@@ -1,0 +1,400 @@
+{
+    "id": 1,
+    "parentId": -1,
+    "label": "snippets",
+    "lastId": 92,
+    "children": [
+        {
+            "id": 41,
+            "parentId": 1,
+            "label": "Boundary Demo",
+            "folder": true,
+            "children": [
+                {
+                    "id": 44,
+                    "parentId": 41,
+                    "label": "Terminal Commands",
+                    "folder": true,
+                    "children": [
+                        {
+                            "id": 45,
+                            "parentId": 44,
+                            "label": "Boundary Authenticate",
+                            "value": "boundary authenticate password \\\n  -password=\"env://boundary_password\" \\\n  -login-name=njackson \\\n  -auth-method-id=${boundary_auth_method_id} \\\n  -format=json \\\n  | jq -r .item.attributes.token > .boundary_token",
+                            "children": []
+                        }
+                    ]
+                },
+                {
+                    "id": 42,
+                    "parentId": 44,
+                    "label": "Workers",
+                    "folder": true,
+                    "children": [
+                        {
+                            "id": 43,
+                            "parentId": 42,
+                            "label": "Terminal Commands",
+                            "folder": true,
+                            "children": [
+                                {
+                                    "id": 46,
+                                    "parentId": 43,
+                                    "label": "Boundary Worker Create",
+                                    "value": "boundary-worker workers create \\\n  controller-led \\\n  -token=\"file://.boundary_token\" ",
+                                    "children": []
+                                },
+                                {
+                                    "id": 55,
+                                    "parentId": 43,
+                                    "label": "Frontend Worker Exec",
+                                    "value": "docker exec -it boundary-worker-frontend.container.shipyard.run /bin/sh",
+                                    "children": []
+                                }
+                            ]
+                        },
+                        {
+                            "id": 47,
+                            "parentId": 42,
+                            "label": "Config",
+                            "folder": true,
+                            "children": [
+                                {
+                                    "id": 48,
+                                    "parentId": 47,
+                                    "label": "Workers Script Vars",
+                                    "value": "echo \"[$(date +%T)] Generating controller led token for boundary worker\"\n\n# The name to use for the worker\nworker_name=\"${worker_name\\}\"\n\n# The HCP cluster id, cluster id will be set in the system.d job as an environment var\ncluster_id=\"${cluster_id\\}\"\n\n# Username and password used to obtain the worker registration token\nusername=\"${username\\}\"\npassword=\"${password\\}\"\n\n# The auth id used for authentication\nauth_method_id=\"${auth_method_id\\}\"\n\n# Base url for the HCP cluster\nbase_url=\"https://${cluster_id\\}.boundary.hashicorp.cloud/v1\"\nauth_url=\"${base_url\\}/auth-methods/${auth_method_id\\}:authenticate\"\ntoken_url=\"${base_url\\}/workers:create:controller-led\"",
+                                    "children": [],
+                                    "resolveSyntax": true
+                                },
+                                {
+                                    "id": 49,
+                                    "parentId": 47,
+                                    "label": "Worker Script Authentication",
+                                    "value": "# Authenticate with Boundary using the username and password and fetch the token\necho \"[$(date +%T)] Authenticating with Boundary controller\"\nauth_request=\"{\\\"attributes\\\":{\\\"login_name\\\":\\\"${username\\}\\\",\\\"password\\\":\\\"${password\\}\\\"}}\"\nresp=$(curl ${auth_url\\} -s -d \"${auth_request\\}\")\ntoken=$(echo ${resp\\} | sed 's/.*\"token\":\"\\([^\"]*\\)\".*/\\1/g')",
+                                    "children": [],
+                                    "resolveSyntax": true
+                                },
+                                {
+                                    "id": 50,
+                                    "parentId": 47,
+                                    "label": "Worker Script Controller Token",
+                                    "value": "# Generate the controller led token request\necho \"[$(date +%T)] Calling boundary API to generate controller led token\"\nresp=$(curl ${token_url\\} -s -H \"Authorization: Bearer ${token\\}\" -d \"{\\\"scope_id\\\":\\\"global\\\",\\\"name\\\":\\\"${worker_name\\}\\\"}\")\ncontroller_generated_activation_token=$(echo ${resp\\} | sed 's/.*\"controller_generated_activation_token\":\"\\([^\"]*\\)\".*/\\1/g')\nworker_id=$(echo ${resp\\} | sed 's/{\"id\":\"\\([^\"]*\\)\".*/\\1/g')\n\n# Write the worker id so we can use this to delete the worker on deallocation\necho \"[$(date +%T)] Writing worker id file to ./worker_id\"\necho ${worker_id\\} > ./worker_id",
+                                    "children": [],
+                                    "resolveSyntax": true
+                                },
+                                {
+                                    "id": 51,
+                                    "parentId": 47,
+                                    "label": "Worker Script Config",
+                                    "value": "echo \"[$(date +%T)] Writing config to ./worker_config.hcl\"\ncat <<-EOT > ./worker_config.hcl\n  disable_mlock = true\n  log_level = \"debug\"\n\n  hcp_boundary_cluster_id = \"${cluster_id\\}\"\n\n  listener \"tcp\" {\n    address = \"0.0.0.0:9202\"\n    purpose = \"proxy\"\n  }\n\n  worker {\n    auth_storage_path=\"/boundary/auth_data\"\n\n    controller_generated_activation_token = \"${controller_generated_activation_token\\}\"\n  \n    tags {\n      type   = [\"vault\"]\n    }\n  }\nEOT\n\necho \"[$(date +%T)] Generated worker config for worker: ${worker_id\\}\"",
+                                    "children": [],
+                                    "resolveSyntax": true
+                                },
+                                {
+                                    "id": 52,
+                                    "parentId": 47,
+                                    "label": "Worker Script Trap",
+                                    "value": "# trap the interrupt so that the worker deregisters on exit\ntrap \"/boundary/deregister.sh\" HUP INT QUIT TERM USR1",
+                                    "children": []
+                                },
+                                {
+                                    "id": 53,
+                                    "parentId": 47,
+                                    "label": "Worker Script Deregister",
+                                    "value": "#!/bin/sh -e\necho \"[$(date +%T)] Deregister boundary worker\"\n\n# Read the worker id from the file written on startup\nworker_id=$(cat ./worker_id)\n\n# Base url for the HCP cluster\nbase_url=\"https://${cluster_id\\}.boundary.hashicorp.cloud/v1\"\nauth_url=\"${base_url\\}/auth-methods/${auth_method_id\\}:authenticate\"\ndereg_url=\"${base_url\\}/workers/${worker_id\\}\"\n\n# Authenticate with Boundary using the username and password and fetch the token\necho \"[$(date +%T)] Authenticating with Boundary controller\"\nauth_request=\"{\\\"attributes\\\":{\\\"login_name\\\":\\\"${username\\}\\\",\\\"password\\\":\\\"${password\\}\\\"}}\"\nresp=$(curl ${auth_url\\} -s -d \"${auth_request\\}\")\ntoken=$(echo ${resp\\} | sed 's/.*\"token\":\"\\([^\"]*\\)\".*/\\1/g')\n\n# Deregister the worker\necho \"[$(date +%T)] Calling boundary API to delete the worker ${worker_id\\}\"\ncurl ${dereg_url\\} -s -H \"Authorization: Bearer ${token\\}\" -X DELETE\n\necho \"[$(date +%T)] Deregistered worker: ${worker_id\\}\"\n\n# Remove the auth folder\necho \"[$(date +%T)] Remove auth folder\"\nrm -rf /boundary/auth_data",
+                                    "children": [],
+                                    "resolveSyntax": true
+                                },
+                                {
+                                    "id": 54,
+                                    "parentId": 47,
+                                    "label": "Worker Script Run",
+                                    "value": "boundary-worker server --config ./worker_config.hcl &\ndpid=$!\nwait $dpid",
+                                    "children": []
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "id": 58,
+                    "parentId": 41,
+                    "label": "SSH",
+                    "folder": true,
+                    "children": [
+                        {
+                            "id": 59,
+                            "parentId": 58,
+                            "label": "Terminal Commands",
+                            "folder": true,
+                            "children": [
+                                {
+                                    "id": 56,
+                                    "parentId": 59,
+                                    "label": "Target Create SSH",
+                                    "value": "boundary targets create ssh \\\n   -token=\"file://.boundary_token\" \\\n   -name=\"vm\" \\\n   -description=\"SSH access for virtual machine\" \\\n   -default-port=22 \\\n   -address=vm.container.shipyard.run \\\n   -scope-id=${boundary_scope_id\\} \\\n   -egress-worker-filter='\"/name\" == \"frontend\"'",
+                                    "children": [],
+                                    "resolveSyntax": true
+                                },
+                                {
+                                    "id": 57,
+                                    "parentId": 59,
+                                    "label": "Target Connect SSH",
+                                    "value": "boundary connect ssh \\\n  -token=\"file://.boundary_token\" \\\n  -target-id=<my target> -- \\\n    -l root \\\n    -i ./shipyard/frontend/files/ssh_keys/id_rsa",
+                                    "children": [],
+                                    "resolveSyntax": true
+                                },
+                                {
+                                    "id": 58,
+                                    "parentId": 59,
+                                    "label": "Vault SSH Secret",
+                                    "value": "vault kv put secret/vm \\\n  username=root \\\n  private_key=@./shipyard/frontend/files/ssh_keys/id_rsa",
+                                    "children": []
+                                },
+                                {
+                                    "id": 64,
+                                    "parentId": 59,
+                                    "label": "Vault Write Policy",
+                                    "value": "vault policy write boundary-controller-secrets secrets_policy.hcl\nvault policy write boundary-controller-token controller_policy.hcl",
+                                    "children": []
+                                },
+                                {
+                                    "id": 65,
+                                    "parentId": 59,
+                                    "label": "Vault Token Create",
+                                    "value": "vault token create \\\n  -period=30m \\\n  -format=json \\\n  -orphan=true \\\n  -policy=boundary-controller-token \\\n  -policy=boundary-controller-secrets \\\n  -no-default-policy=true \\\n  -renewable=true",
+                                    "children": []
+                                },
+                                {
+                                    "id": 66,
+                                    "parentId": 59,
+                                    "label": "Credential Store Create",
+                                    "value": "boundary credential-stores create vault \\\n  -token=\"file://.boundary_token\" \\\n  -scope-id \"${boundary_scope_id\\}\" \\\n  -vault-address \"http://10.0.3.210:8200\" \\\n  -vault-token \"$(vault token create \\\n    -period=30m \\\n    -format=json \\\n    -orphan=true \\\n    -policy=boundary-controller-token \\\n    -policy=boundary-controller-secrets \\\n    -no-default-policy=true \\\n    -renewable=true | jq -r .auth.client_token)\"",
+                                    "children": [],
+                                    "resolveSyntax": true
+                                },
+                                {
+                                    "id": 67,
+                                    "parentId": 59,
+                                    "label": "Credential Store Create Filter",
+                                    "value": "boundary credential-stores create vault \\\n  -token=\"file://.boundary_token\" \\\n  -scope-id \"${boundary_scope_id\\}\" \\\n  -vault-address \"http://10.0.3.210:8200\" \\\n  -vault-token \"$(vault token create \\\n    -period=30m \\\n    -format=json \\\n    -orphan=true \\\n    -policy=boundary-controller-token \\\n    -policy=boundary-controller-secrets \\\n    -no-default-policy=true \\\n    -renewable=true | jq -r .auth.client_token)\" \\\n  -worker-filter='\"/name\" == \"vault\"'",
+                                    "children": [],
+                                    "resolveSyntax": true
+                                },
+                                {
+                                    "id": 68,
+                                    "parentId": 59,
+                                    "label": "Credential Library Create",
+                                    "value": "boundary credential-libraries create vault \\\n  -token=\"file://.boundary_token\" \\\n  -credential-store-id <cred store id> \\\n  -vault-path \"secret/data/vm\" \\\n  -name \"vault-ssh-library\" \\\n  -credential-type ssh_private_key",
+                                    "children": []
+                                },
+                                {
+                                    "id": 69,
+                                    "parentId": 59,
+                                    "label": "Credential Target Add",
+                                    "value": "boundary targets add-credential-sources \\\n  -token=\"file://.boundary_token\" \\\n  -id <target id> \\\n  -injected-application-credential-source <cred source>",
+                                    "children": []
+                                },
+                                {
+                                    "id": 70,
+                                    "parentId": 59,
+                                    "label": "Boundary Connect SSH",
+                                    "value": "boundary connect ssh \\\n  -token=\"file://.boundary_token\" \\\n  -target-id=<my target>",
+                                    "children": []
+                                }
+                            ]
+                        },
+                        {
+                            "id": 60,
+                            "parentId": 58,
+                            "label": "Config",
+                            "folder": true,
+                            "children": [
+                                {
+                                    "id": 59,
+                                    "parentId": 60,
+                                    "label": "Vault SSH Policy",
+                                    "value": "path = \"secret/data/vm\" {\n  capabilities = [\"read\"]\n}",
+                                    "children": [],
+                                    "resolveSyntax": true
+                                },
+                                {
+                                    "id": 63,
+                                    "parentId": 60,
+                                    "label": "Vault Controller Policy",
+                                    "value": "path \"auth/token/lookup-self\" {\n  capabilities = [\"read\"]\n}\n\npath \"auth/token/renew-self\" {\n  capabilities = [\"update\"]\n}\n\npath \"auth/token/revoke-self\" {\n  capabilities = [\"update\"]\n}\n\npath \"sys/leases/renew\" {\n  capabilities = [\"update\"]\n}\n\npath \"sys/leases/revoke\" {\n  capabilities = [\"update\"]\n}\n\npath \"sys/capabilities-self\" {\n  capabilities = [\"update\"]\n}",
+                                    "children": []
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "id": 71,
+                    "parentId": 41,
+                    "label": "Nomad",
+                    "folder": true,
+                    "children": [
+                        {
+                            "id": 72,
+                            "parentId": 71,
+                            "label": "Terminal Commands",
+                            "folder": true,
+                            "children": [
+                                {
+                                    "id": 74,
+                                    "parentId": 72,
+                                    "label": "Vault Enable Boundary",
+                                    "value": "vault secrets enable boundary",
+                                    "children": []
+                                },
+                                {
+                                    "id": 75,
+                                    "parentId": 72,
+                                    "label": "Vault Configure Boundary",
+                                    "value": "vault write boundary/config \\\n  addr=${BOUNDARY_ADDR\\} \\\n  login_name=${boundary_username\\} \\\n  password=${boundary_password\\} \\\n  auth_method_id=${boundary_auth_method_id\\}",
+                                    "children": [],
+                                    "resolveSyntax": true
+                                },
+                                {
+                                    "id": 76,
+                                    "parentId": 72,
+                                    "label": "Vault Worker Role",
+                                    "value": "vault write boundary/role/worker \\\n  ttl=180 \\\n  max_ttl=3600 \\\n  role_type=worker \\\n  scope_id=global",
+                                    "children": [],
+                                    "resolveSyntax": true
+                                },
+                                {
+                                    "id": 77,
+                                    "parentId": 72,
+                                    "label": "Vault Generate Worker Creds",
+                                    "value": "vault read boundary/creds/worker worker_name=\"local worker\"",
+                                    "children": []
+                                },
+                                {
+                                    "id": 79,
+                                    "parentId": 72,
+                                    "label": "Vault Write Worker Policy",
+                                    "value": "vault policy write boundary-worker worker_policy.hcl",
+                                    "children": []
+                                }
+                            ]
+                        },
+                        {
+                            "id": 73,
+                            "parentId": 71,
+                            "label": "Config",
+                            "folder": true,
+                            "children": [
+                                {
+                                    "id": 78,
+                                    "parentId": 73,
+                                    "label": "Vault Worker Policy",
+                                    "value": "path = \"boundary/creds/worker\" {\n  capabilities = [\"read\", \"update\"]\n}",
+                                    "children": []
+                                },
+                                {
+                                    "id": 80,
+                                    "parentId": 73,
+                                    "label": "Nomad Worker Base",
+                                    "value": "job \"boundary_worker\" {\n  datacenters = [\"dc1\"]\n\n  type = \"service\"\n\n  group \"worker\" {\n    count = 1\n\n    restart {\n      # The number of attempts to run the job within the specified interval.\n      attempts = 2\n      interval = \"30m\"\n      delay    = \"15s\"\n      mode     = \"fail\"\n    }\n\n    ephemeral_disk {\n      size = 30\n    }\n\n    task \"worker\" {\n      driver = \"docker\"\n\n      logs {\n        max_files     = 2\n        max_file_size = 10\n      }\n\n      resources {\n        cpu    = 500 # 500 MHz\n        memory = 512 # 512MB\n      }\n    }\n  }\n}",
+                                    "children": []
+                                },
+                                {
+                                    "id": 81,
+                                    "parentId": 73,
+                                    "label": "Nomad Worker Vault Stanza",
+                                    "value": "      vault {\n        policies = [\"boundary-worker\"]\n      }",
+                                    "children": []
+                                },
+                                {
+                                    "id": 82,
+                                    "parentId": 73,
+                                    "label": "Nomad Worker Template",
+                                    "value": "      template {\n        data = <<-EOF\n          disable_mlock = true\n\n          hcp_boundary_cluster_id = \"739d93f9-7f1c-474d-8524-931ab199eaf8\"\n\n          listener \"tcp\" {\n            address = \"0.0.0.0:9202\"\n            purpose = \"proxy\"\n          }\n\n          worker {\n            auth_storage_path=\"/boundary/auth_data\"\n            {{with secret \"boundary/creds/worker\" (env \"NOMAD_ALLOC_ID\" | printf \"worker_name=%s\") -}}\n              controller_generated_activation_token = \"{{.Data.activation_token}}\"\n            {{- end}}\n  \n            tags {\n              environment   = [\"nomad\"]\n            }\n          }\n        EOF\n\n        destination = \"local/config.hcl\"\n      }",
+                                    "children": []
+                                },
+                                {
+                                    "id": 83,
+                                    "parentId": 73,
+                                    "label": "Nomad Worker Config",
+                                    "value": "      config {\n        image   = \"hashicorp/boundary-worker-hcp:0.12.0-hcp\"\n        command = \"boundary-worker\"\n        args = [\n          \"server\",\n          \"-config\",\n          \"local/config.hcl\"\n        ]\n      }",
+                                    "children": []
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "id": 84,
+                    "parentId": 41,
+                    "label": "Census",
+                    "folder": true,
+                    "children": [
+                        {
+                            "id": 85,
+                            "parentId": 84,
+                            "label": "Terminal Commands",
+                            "folder": true,
+                            "children": [
+                                {
+                                    "id": 87,
+                                    "parentId": 85,
+                                    "label": "Vault Secrets Census",
+                                    "value": "vault kv put secret/census \\\n  boundary_username=\"${boundary_username\\}\" \\\n  boundary_password=\"${boundary_password\\}\" \\\n  boundary_org_id=\"${boundary_org_id\\}\" \\\n  boundary_auth_method_id=\"${boundary_auth_method_id\\}\"",
+                                    "children": [],
+                                    "resolveSyntax": true
+                                },
+                                {
+                                    "id": 89,
+                                    "parentId": 85,
+                                    "label": "Vault Census Policy Write",
+                                    "value": "vault policy write boundary-census census_policy.hcl",
+                                    "children": []
+                                },
+                                {
+                                    "id": 90,
+                                    "parentId": 85,
+                                    "label": "Nomad Deploy Census",
+                                    "value": "nomad run ./shipyard/backend/files/jobs/census.hcl",
+                                    "children": []
+                                },
+                                {
+                                    "id": 92,
+                                    "parentId": 85,
+                                    "label": "Nomad Deploy API",
+                                    "value": "nomad run ./shipyard/backend/files/jobs/api.hcl",
+                                    "children": []
+                                },
+                                {
+                                    "id": 91,
+                                    "parentId": 85,
+                                    "label": "Boundary Connect API",
+                                    "value": "boundary connect \\\n  -target-id <target id> \\\n  -token=\"file://.boundary_token\"",
+                                    "children": []
+                                }
+                            ]
+                        },
+                        {
+                            "id": 86,
+                            "parentId": 84,
+                            "label": "Config",
+                            "folder": true,
+                            "children": [
+                                {
+                                    "id": 88,
+                                    "parentId": 86,
+                                    "label": "Vault Census Policy",
+                                    "value": "path \"secret/data/census\" {\n  capabilities = [\"read\"]\n}",
+                                    "children": [],
+                                    "resolveSyntax": true
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}
