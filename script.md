@@ -1,4 +1,3 @@
-lease_id            boundary/creds/worker/s5fqm0B0bAeX0ZVkrQqf8nQrvault secrets enable boundary
 # Boundary Demo
 
 Providing remote access to applications and systems requires secure routing 
@@ -50,6 +49,9 @@ export SY_VAR_boundary_auth_method_id=<worker auth method>
 
 ### Authenticating to Boundary
 
+To log into boundary the following command can be used
+
+**Boundary Authenticate**
 ```shell
 boundary authenticate password \
   -password="env://boundary_password" \
@@ -111,7 +113,9 @@ the private VPC without the need for opening any ports. Let's see how this works
 To run the boundary worker we first need to configure it; the following configuration
 file is an example config for configuring a boundary worker.
 
-```hcl
+*example_worker_config.hcl*
+
+```javascript
 hcp_boundary_cluster_id = "my_cluster_id"
 
 listener "tcp" {
@@ -187,9 +191,10 @@ Worker information:
 ```
 
 However, there is a problem to run this command you need to be authenticated,
-so first, you need to authenticate.
+so first, you need to authenticate. Which means we also need to run this
+command.
 
-**Terminal Snippet: Boundary Worker Authenticate**
+**Terminal Snippet: Boundary Authenticate**
 
 ```shell
 boundary authenticate password \
@@ -253,7 +258,6 @@ Now we have a token, you can use that to generate the worker token.
 ```bash
 # Generate the controller led token request
 echo "[$(date +%T)] Calling boundary API to generate controller led token"
-auth_request="{\"attributes\":{\"login_name\":\"${username}\",\"password\":\"${password}\"}}"
 resp=$(curl ${token_url} -s -H "Authorization: Bearer ${token}" -d "{\"scope_id\":\"global\",\"name\":\"${worker_name}\"}")
 controller_generated_activation_token=$(echo ${resp} | sed 's/.*"controller_generated_activation_token":"\([^"]*\)".*/\1/g')
 worker_id=$(echo ${resp} | sed 's/{"id":"\([^"]*\)".*/\1/g')
@@ -375,7 +379,10 @@ cd /boundary
 
 ### Connecting to the Worker
 
-Now the worker is
+Now the worker is running we need to create a target in boundary in order
+to connect to it.
+
+**Target Create SSH**
 
 ```shell
 boundary targets create ssh \

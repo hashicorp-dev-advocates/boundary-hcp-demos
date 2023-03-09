@@ -1,4 +1,5 @@
 #!/bin/sh -e
+
 echo "[$(date +%T)] Deregister boundary worker"
 
 # Read the worker id from the file written on startup
