@@ -40,6 +40,7 @@ job "census" {
             }
 
             boundary {
+              enterprise = "true"
               username = "{{.Data.data.boundary_username}}"
               password = "{{.Data.data.boundary_password}}"
               address  = "https://739d93f9-7f1c-474d-8524-931ab199eaf8.boundary.hashicorp.cloud"
@@ -48,6 +49,9 @@ job "census" {
               auth_method_id  = "{{.Data.data.boundary_auth_method_id}}"
               default_project = "Boundary Demo"
               default_groups  = ["developers"]
+              default_egress_filter = <<EOT
+              "nomad" in "/tags/environment"
+              EOT
             }
           }
           {{end}}
@@ -62,7 +66,7 @@ job "census" {
       }
 
       config {
-        image = "nicholasjackson/census:89e37999"
+        image = "nicholasjackson/census:e3651dac"
         args = [
           "-config",
           "local/config.hcl"

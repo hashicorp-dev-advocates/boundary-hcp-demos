@@ -11,9 +11,9 @@
   worker {
     auth_storage_path="/boundary/auth_data"
 
-    controller_generated_activation_token = "{"kind":"InvalidArgument","message":"Invalid request. Request attempted to make second resource with the same field value that must be unique."}"
+    controller_generated_activation_token = "neslat_2Kr7PHmjwDbq7J5tXt7ANUtwgQvee6AhvaPMveCyWuqq2S3P5yUH5YaS4oknAtB9TuPrvdy97PFndTH4SFAyscBHiq5M9"
   
     tags {
-      type   = ["vault"]
+      type   = ["vm"]
     }
   }

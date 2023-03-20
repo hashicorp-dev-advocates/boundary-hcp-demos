@@ -1,4 +1,8 @@
 #!/bin/sh -e
+
+# trap the interupt so that the worker deregisters on exit
+trap "/boundary/deregister.sh" HUP INT QUIT TERM USR1
+
 echo "[$(date +%T)] Generating controller led token for boundary worker"
 
 # The name to use for the worker
@@ -35,6 +39,7 @@ worker_id=$(echo ${resp} | sed 's/{"id":"\([^"]*\)".*/\1/g')
 echo "[$(date +%T)] Writing worker id file to ./worker_id"
 echo ${worker_id} > ./worker_id
 
+# Write the config
 echo "[$(date +%T)] Writing config to ./worker_config.hcl"
 cat <<-EOT > ./worker_config.hcl
   disable_mlock = true
@@ -53,9 +58,13 @@ cat <<-EOT > ./worker_config.hcl
     controller_generated_activation_token = "${controller_generated_activation_token}"
   
     tags {
-      type   = ["vault"]
+      type   = ["vm"]
     }
   }
 EOT
 
 echo "[$(date +%T)] Generated worker config for worker: ${worker_id}"
+
+boundary-worker server --config ./worker_config.hcl &
+dpid=$!
+wait $dpid
